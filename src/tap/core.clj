@@ -8,39 +8,32 @@
 (defn pow [base exponent]
   (reduce *' (repeat exponent base)))
 
-(defn bezier-3 [p0 p1 p2]
+(defn bezier [[p0 p1 p2 p3]]
   (fn [t]
     (+
-      (* (pow (- 1 t) 2) p0)
-      (* 2 (- 1 t) t p1)
-      (* (pow t 2) p2))))
+      (* (pow (- 1 t) 3) p0)
+      (* 3 (pow (- 1 t) 2) t p1)
+      (* 3 (- 1 t) (pow t 2) p2)
+      (* (pow t 3) p3))))
 
-(defn bezier-3' [p0 p1 p2]
+(defn bezier' [[p0 p1 p2 p3]]
   (fn [t]
     (+
-      (* 2 (- 1 t) (- p1 p0))
-      (* 2 t (- p2 p1)))))
+      (* 3 (pow (- 1 t) 2) (- p1 p0))
+      (* 6 (- 1 t) t (- p2 p1))
+      (* 3 (pow t 2) (- p3 p2)))))
 
 (defn non-zero [v]
   (if (= 0 v) 0.0001 v))
 
-(defn tangent-angle [[x1 y1] [x2 y2] [x3 y3]]
-  (let [x' (bezier-3' x1 x2 x3)
-        y' (bezier-3' y1 y2 y3)]
-    (fn [t]
-      (-> (/ (y' t)
-             (non-zero (x' t)))
-          (Math/atan)
-          (+ (* (Math/PI) 0.5))))))
-
 ;;;
 
-(def segment-radius 10)
-(def segment-hole-radius 8)
+(def segment-radius 8)
+(def segment-hole-radius 5)
 (def segment-face-thickness 1)
-(def segment-face-cleaner-thickness 1.5)
+(def segment-face-cleaner-thickness 1.2)
 (def curve-parameters-sequence-step 0.05)
-(def tap-pipe-bezier-params [[20 0] [30 70] [-20 40]])
+(def tap-pipe-bezier-params [[0 0] [0 60] [30 60] [30 30]])
 
 ;;;
 
@@ -56,27 +49,36 @@
        (rotate face-angle [0 0 1])
        (translate [x y 0])))
 
-(defn segment-face-holes-cleaner [[x1 x2] [y1 y2] [alpha1 alpha2] r]
+(defn pipe-segment-face-holes-cleaner [[x1 x2] [y1 y2] [alpha1 alpha2] r]
   (union (segment-face-hole-cleaner x1 y1 alpha1 r)
          (segment-face-hole-cleaner x2 y2 alpha2 r)))
 
-(defn segment-ingot [[x1 x2] [y1 y2] [alpha1 alpha2] r]
+(defn pipe-segment-ingot [[x1 x2] [y1 y2] [alpha1 alpha2] r]
   (hull (segment-face x1 y1 alpha1 r)
         (segment-face x2 y2 alpha2 r)))
 
-(defn segment [p1 p2 p3]
+(defn tangent-angle [pxs pys]
+  (let [x' (bezier' pxs)
+        y' (bezier' pys)]
+    (fn [t]
+      (-> (/ (y' t)
+             (non-zero (x' t)))
+          (Math/atan)
+          (+ (* (Math/PI) 0.5))))))
+
+(defn pipe-segment [pxs pys]
   (fn [x1x2 y1y2 t1t2]
-    (let [segment-face-angle (tangent-angle p1 p2 p3)
+    (let [segment-face-angle (tangent-angle pxs pys)
           ang1ang2 (map segment-face-angle t1t2)]
-      (difference (segment-ingot x1x2 y1y2 ang1ang2 segment-radius)
-                  (segment-ingot x1x2 y1y2 ang1ang2 segment-hole-radius)
-                  (segment-face-holes-cleaner x1x2 y1y2 ang1ang2 segment-hole-radius)))))
+      (difference (pipe-segment-ingot x1x2 y1y2 ang1ang2 segment-radius)
+                  (pipe-segment-ingot x1x2 y1y2 ang1ang2 segment-hole-radius)
+                  (pipe-segment-face-holes-cleaner x1x2 y1y2 ang1ang2 segment-hole-radius)))))
 
 (def coord-seq
   (partial partition 2 1))
 
-(defn tap-pipe-bezier [[p1 p2 p3] xs ys ts]
-  (->> (map (segment p1 p2 p3)
+(defn tap-pipe-bezier [pxs pys xs ys ts]
+  (->> (map (pipe-segment pxs pys)
             (coord-seq xs)
             (coord-seq ys)
             (coord-seq ts))
@@ -84,11 +86,12 @@
        (doall)))
 
 (defn tap []
-  (let [[[x1 y1] [x2 y2] [x3 y3] :as bezier-params] tap-pipe-bezier-params
+  (let [pxs (map first tap-pipe-bezier-params)
+        pys (map second tap-pipe-bezier-params)
         ts (range 0 1 curve-parameters-sequence-step)
-        xs (map (bezier-3 x1 x2 x3) ts)
-        ys (map (bezier-3 y1 y2 y3) ts)]
-    (tap-pipe-bezier bezier-params xs ys ts)))
+        xs (map (bezier pxs) ts)
+        ys (map (bezier pys) ts)]
+    (tap-pipe-bezier pxs pys xs ys ts)))
 
 ;;;
 
